@@ -3,6 +3,86 @@ session_start();
 header('Content-Type: application/json');
 require_once __DIR__ . '/config.php';
 
+/**
+ * Check if the current request is from an authenticated admin
+ * Admins can authenticate via:
+ * 1. Session (logged in via admin panel)
+ * 2. Auth header (for API access)
+ * @return bool
+ */
+function isAdminAuthenticated() {
+    // Check session-based admin auth
+    if (isset($_SESSION['admin_authenticated']) && $_SESSION['admin_authenticated'] === true) {
+        return true;
+    }
+    
+    // Check header-based auth (for API/AJAX from admin panel)
+    if (isset($_POST['admin_auth'])) {
+        $auth = $_POST['admin_auth'];
+        $decoded = base64_decode($auth);
+        if ($decoded === 'admin:admin') {
+            return true;
+        }
+    }
+    
+    // Check Authorization header
+    $headers = function_exists('getallheaders') ? getallheaders() : [];
+    if (isset($headers['Authorization'])) {
+        $auth = str_replace('Basic ', '', $headers['Authorization']);
+        $decoded = base64_decode($auth);
+        if ($decoded === 'admin:admin') {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+/**
+ * Return error for admin-only commands
+ */
+function adminOnlyError() {
+    echo json_encode([
+        'ok' => false, 
+        'error' => 'This command requires admin authentication. Please use the admin panel.',
+        'admin_required' => true
+    ]);
+    exit;
+}
+
+/**
+ * Normalize text for consistent matching
+ * - Converts to lowercase
+ * - Removes punctuation and special characters
+ * - Trims whitespace
+ * - Handles Unicode properly
+ * 
+ * @param string $text Input text
+ * @return string Normalized text
+ */
+function normalizeText($text) {
+    if ($text === null || $text === '') {
+        return '';
+    }
+    // Convert to lowercase (Unicode-aware)
+    $text = function_exists('mb_strtolower') ? mb_strtolower($text, 'UTF-8') : strtolower($text);
+    // Remove punctuation and special characters, keep letters, numbers, spaces
+    $text = preg_replace('/[^\p{L}\p{N}\s]/u', '', $text);
+    // Collapse multiple spaces into one
+    $text = preg_replace('/\s+/', ' ', $text);
+    // Trim whitespace
+    return trim($text);
+}
+
+/**
+ * Check if intent-based tables exist
+ * @return bool
+ */
+function hasIntentTables($conn) {
+    $result = mysqli_query($conn, "SHOW TABLES LIKE 'intents'");
+    return $result && mysqli_num_rows($result) > 0;
+}
+
 // Initialize conversation history in session if not exists
 if (!isset($_SESSION['conversation_history'])) {
     $_SESSION['conversation_history'] = [];
@@ -19,8 +99,9 @@ if (isset($_SESSION['conversation_history']) && is_array($_SESSION['conversation
     $contextMessages = array_slice($history, -$getContext, $getContext);
 }
 
-// Command: replay_with: <reply>
+// Command: replay_with: <reply> (ADMIN ONLY)
 if ($getMesgRaw !== '' && preg_match('/^\s*replay_with\s*:(.*)$/i', $getMesgRaw, $m)) {
+    if (!isAdminAuthenticated()) { adminOnlyError(); }
     $reply = trim($m[1]);
     if ($reply === '') {
         echo json_encode([ 'ok' => false, 'error' => 'Empty reply in replay_with' ]);
@@ -38,11 +119,60 @@ if ($getMesgRaw !== '' && preg_match('/^\s*replay_with\s*:(.*)$/i', $getMesgRaw,
         exit;
     }
 
-    // Insert into chatbot
-    $stmt = mysqli_prepare($conn, 'INSERT INTO chatbot (queries, replies) VALUES (?, ?)');
-    mysqli_stmt_bind_param($stmt, 'ss', $learning['queries'], $reply);
-    mysqli_stmt_execute($stmt);
-    mysqli_stmt_close($stmt);
+    // Check if using intent-based system
+    if (hasIntentTables($conn)) {
+        // Create a quick intent from the query
+        $query = $learning['queries'];
+        $intentName = preg_replace('/[^a-zA-Z0-9\s]/', '', $query);
+        $intentName = preg_replace('/\s+/', '_', trim($intentName));
+        $intentName = substr($intentName, 0, 50);
+        if ($intentName === '') {
+            $intentName = 'quick_' . $learning['id'];
+        }
+        
+        // Check if intent exists
+        $checkStmt = mysqli_prepare($conn, "SELECT id FROM intents WHERE name = ?");
+        mysqli_stmt_bind_param($checkStmt, 's', $intentName);
+        mysqli_stmt_execute($checkStmt);
+        $checkResult = mysqli_stmt_get_result($checkStmt);
+        $existingIntent = mysqli_fetch_assoc($checkResult);
+        mysqli_stmt_close($checkStmt);
+        
+        $intentId = null;
+        if ($existingIntent) {
+            $intentId = (int)$existingIntent['id'];
+        } else {
+            // Create intent
+            $desc = 'Quick-trained via replay_with command';
+            $insertIntent = mysqli_prepare($conn, "INSERT INTO intents (name, description) VALUES (?, ?)");
+            mysqli_stmt_bind_param($insertIntent, 'ss', $intentName, $desc);
+            if (mysqli_stmt_execute($insertIntent)) {
+                $intentId = mysqli_insert_id($conn);
+            }
+            mysqli_stmt_close($insertIntent);
+        }
+        
+        if ($intentId) {
+            // Add training phrase
+            $normalized = normalizeText($query);
+            $insertPhrase = mysqli_prepare($conn, "INSERT INTO training_phrases (intent_id, phrase, phrase_normalized) VALUES (?, ?, ?)");
+            mysqli_stmt_bind_param($insertPhrase, 'iss', $intentId, $query, $normalized);
+            mysqli_stmt_execute($insertPhrase);
+            mysqli_stmt_close($insertPhrase);
+            
+            // Add response
+            $insertResp = mysqli_prepare($conn, "INSERT INTO intent_responses (intent_id, response, confidence) VALUES (?, ?, 1.0)");
+            mysqli_stmt_bind_param($insertResp, 'is', $intentId, $reply);
+            mysqli_stmt_execute($insertResp);
+            mysqli_stmt_close($insertResp);
+        }
+    } else {
+        // Legacy: Insert into chatbot
+        $stmt = mysqli_prepare($conn, 'INSERT INTO chatbot (queries, replies) VALUES (?, ?)');
+        mysqli_stmt_bind_param($stmt, 'ss', $learning['queries'], $reply);
+        mysqli_stmt_execute($stmt);
+        mysqli_stmt_close($stmt);
+    }
 
     // Cleanup learning sample
     $stmt = mysqli_prepare($conn, 'DELETE FROM learning WHERE id = ?');
@@ -54,8 +184,9 @@ if ($getMesgRaw !== '' && preg_match('/^\s*replay_with\s*:(.*)$/i', $getMesgRaw,
     exit;
 }
 
-// Command: remove_replay: <query>  OR remove_replay:id:<id>
+// Command: remove_replay: <query>  OR remove_replay:id:<id> (ADMIN ONLY)
 if ($getMesgRaw !== '' && preg_match('/^\s*remove_replay\s*:(.*)$/i', $getMesgRaw, $m)) {
+    if (!isAdminAuthenticated()) { adminOnlyError(); }
     $arg = trim($m[1]);
     $deleted = 0;
     if (preg_match('/^id\s*:(\d+)$/i', $arg, $mm)) {
@@ -87,8 +218,9 @@ if ($getMesgRaw !== '' && preg_match('/^\s*remove_replay\s*:(.*)$/i', $getMesgRa
     exit;
 }
 
-// Command: list_replies: <term> [limit:10]
+// Command: list_replies: <term> [limit:10] (ADMIN ONLY)
 if ($getMesgRaw !== '' && preg_match('/^\s*list_replies\s*:(.*)$/i', $getMesgRaw, $m)) {
+    if (!isAdminAuthenticated()) { adminOnlyError(); }
     $arg = trim($m[1]);
     $limit = 10;
     if (preg_match('/limit\s*:\s*(\d+)/i', $arg, $mm)) {
@@ -118,9 +250,10 @@ if ($getMesgRaw !== '' && preg_match('/^\s*list_replies\s*:(.*)$/i', $getMesgRaw
     exit;
 }
 
-// Command: add_reply:id:<id>: <new reply>  OR add_reply:<query>: <new reply>
+// Command: add_reply:id:<id>: <new reply>  OR add_reply:<query>: <new reply> (ADMIN ONLY)
 // Adds another reply variant to an existing query (creates array if single reply exists)
 if ($getMesgRaw !== '' && preg_match('/^\s*add_reply\s*:(.*)$/i', $getMesgRaw, $m)) {
+    if (!isAdminAuthenticated()) { adminOnlyError(); }
     $arg = trim($m[1]);
     $id = null;
     $newReply = '';
@@ -176,8 +309,9 @@ if ($getMesgRaw !== '' && preg_match('/^\s*add_reply\s*:(.*)$/i', $getMesgRaw, $
     exit;
 }
 
-// Command: edit_replay:id:<id>: <new reply>  OR edit_replay:<query>: <new reply>
+// Command: edit_replay:id:<id>: <new reply>  OR edit_replay:<query>: <new reply> (ADMIN ONLY)
 if ($getMesgRaw !== '' && preg_match('/^\s*edit_replay\s*:(.*)$/i', $getMesgRaw, $m)) {
+    if (!isAdminAuthenticated()) { adminOnlyError(); }
     $arg = trim($m[1]);
     $id = null;
     $newReply = '';
@@ -226,8 +360,9 @@ if ($getMesgRaw !== '' && preg_match('/^\s*show_context\s*$/i', $getMesgRaw)) {
     exit;
 }
 
-// Command: show_stats
+// Command: show_stats (ADMIN ONLY)
 if ($getMesgRaw !== '' && preg_match('/^\s*show_stats\s*$/i', $getMesgRaw)) {
+    if (!isAdminAuthenticated()) { adminOnlyError(); }
     $stats = [];
     $q = function($sql) use ($conn) {
         $res = mysqli_query($conn, $sql);
@@ -245,8 +380,9 @@ if ($getMesgRaw !== '' && preg_match('/^\s*show_stats\s*$/i', $getMesgRaw)) {
     exit;
 }
 
-// Command: export_data [what:all|chatbot|learning]
+// Command: export_data [what:all|chatbot|learning] (ADMIN ONLY)
 if ($getMesgRaw !== '' && preg_match('/^\s*export_data(.*)$/i', $getMesgRaw, $m)) {
+    if (!isAdminAuthenticated()) { adminOnlyError(); }
     $arg = trim($m[1] ?? '');
     $what = 'all';
     if (preg_match('/what\s*:\s*(chatbot|learning|all)/i', $arg, $mm)) {
@@ -273,9 +409,10 @@ if ($getMesgRaw !== '' && preg_match('/^\s*export_data(.*)$/i', $getMesgRaw, $m)
     exit;
 }
 
-// Command: bulk_train: <json>
+// Command: bulk_train: <json> (ADMIN ONLY)
 // Accepts JSON with pairs: [{"q": "query", "a": "reply"}, ...] or [{"query": "...", "reply": "..."}, ...]
 if ($getMesgRaw !== '' && preg_match('/^\s*bulk_train\s*:(.*)$/is', $getMesgRaw, $m)) {
+    if (!isAdminAuthenticated()) { adminOnlyError(); }
     $jsonPart = trim($m[1]);
     if ($jsonPart === '') {
         echo json_encode([ 'ok' => false, 'error' => 'Provide JSON payload after bulk_train:' ]);
@@ -327,9 +464,10 @@ if ($getMesgRaw !== '' && preg_match('/^\s*bulk_train\s*:(.*)$/is', $getMesgRaw,
     exit;
 }
 
-// Command: import_data: <json>
+// Command: import_data: <json> (ADMIN ONLY)
 // Accepts a JSON object with optional keys: chatbot: [{query, reply}], learning: [{query, reply}]
 if ($getMesgRaw !== '' && preg_match('/^\s*import_data\s*:(.*)$/is', $getMesgRaw, $m)) {
+    if (!isAdminAuthenticated()) { adminOnlyError(); }
     $jsonPart = trim($m[1]);
     if ($jsonPart === '') {
         echo json_encode([ 'ok' => false, 'error' => 'Provide JSON payload after import_data:' ]);
@@ -369,8 +507,9 @@ if ($getMesgRaw !== '' && preg_match('/^\s*import_data\s*:(.*)$/is', $getMesgRaw
     exit;
 }
 
-// Command: list_learning [limit:50]
+// Command: list_learning [limit:50] (ADMIN ONLY)
 if ($getMesgRaw !== '' && preg_match('/^\s*list_learning(.*)$/i', $getMesgRaw, $m)) {
+    if (!isAdminAuthenticated()) { adminOnlyError(); }
     $arg = trim($m[1] ?? '');
     $limit = 50;
     if (preg_match('/limit\s*:\s*(\d+)/i', $arg, $mm)) {
@@ -385,8 +524,9 @@ if ($getMesgRaw !== '' && preg_match('/^\s*list_learning(.*)$/i', $getMesgRaw, $
     exit;
 }
 
-// Handle training write: expects POST teach_for (learning id) and reply
+// Handle training write: expects POST teach_for (learning id) and reply (ADMIN ONLY)
 if (isset($_POST['teach_for']) && isset($_POST['reply'])) {
+    if (!isAdminAuthenticated()) { adminOnlyError(); }
     $teachId = intval($_POST['teach_for']);
     $reply = trim($_POST['reply']);
     if ($teachId <= 0 || $reply === '') {
@@ -407,11 +547,60 @@ if (isset($_POST['teach_for']) && isset($_POST['reply'])) {
         exit;
     }
 
-    // Insert into chatbot
-    $stmt = mysqli_prepare($conn, 'INSERT INTO chatbot (queries, replies) VALUES (?, ?)');
-    mysqli_stmt_bind_param($stmt, 'ss', $learning['queries'], $reply);
-    mysqli_stmt_execute($stmt);
-    mysqli_stmt_close($stmt);
+    // Check if using intent-based system
+    if (hasIntentTables($conn)) {
+        // Create a quick intent from the query
+        $query = $learning['queries'];
+        $intentName = preg_replace('/[^a-zA-Z0-9\s]/', '', $query);
+        $intentName = preg_replace('/\s+/', '_', trim($intentName));
+        $intentName = substr($intentName, 0, 50);
+        if ($intentName === '') {
+            $intentName = 'taught_' . $teachId;
+        }
+        
+        // Check if intent exists
+        $checkStmt = mysqli_prepare($conn, "SELECT id FROM intents WHERE name = ?");
+        mysqli_stmt_bind_param($checkStmt, 's', $intentName);
+        mysqli_stmt_execute($checkStmt);
+        $checkResult = mysqli_stmt_get_result($checkStmt);
+        $existingIntent = mysqli_fetch_assoc($checkResult);
+        mysqli_stmt_close($checkStmt);
+        
+        $intentId = null;
+        if ($existingIntent) {
+            $intentId = (int)$existingIntent['id'];
+        } else {
+            // Create intent
+            $desc = 'Taught via chat interface';
+            $insertIntent = mysqli_prepare($conn, "INSERT INTO intents (name, description) VALUES (?, ?)");
+            mysqli_stmt_bind_param($insertIntent, 'ss', $intentName, $desc);
+            if (mysqli_stmt_execute($insertIntent)) {
+                $intentId = mysqli_insert_id($conn);
+            }
+            mysqli_stmt_close($insertIntent);
+        }
+        
+        if ($intentId) {
+            // Add training phrase
+            $normalized = normalizeText($query);
+            $insertPhrase = mysqli_prepare($conn, "INSERT INTO training_phrases (intent_id, phrase, phrase_normalized) VALUES (?, ?, ?)");
+            mysqli_stmt_bind_param($insertPhrase, 'iss', $intentId, $query, $normalized);
+            mysqli_stmt_execute($insertPhrase);
+            mysqli_stmt_close($insertPhrase);
+            
+            // Add response
+            $insertResp = mysqli_prepare($conn, "INSERT INTO intent_responses (intent_id, response, confidence) VALUES (?, ?, 1.0)");
+            mysqli_stmt_bind_param($insertResp, 'is', $intentId, $reply);
+            mysqli_stmt_execute($insertResp);
+            mysqli_stmt_close($insertResp);
+        }
+    } else {
+        // Legacy: Insert into chatbot
+        $stmt = mysqli_prepare($conn, 'INSERT INTO chatbot (queries, replies) VALUES (?, ?)');
+        mysqli_stmt_bind_param($stmt, 'ss', $learning['queries'], $reply);
+        mysqli_stmt_execute($stmt);
+        mysqli_stmt_close($stmt);
+    }
 
     // Delete learning sample
     $stmt = mysqli_prepare($conn, 'DELETE FROM learning WHERE id = ?');
@@ -509,18 +698,119 @@ if (!$isCommand) {
     ];
 }
 
-// Use prepared LIKE to find candidates (use both original and enhanced query)
-$like1 = '%' . $getMesgRaw . '%';
-$like2 = '%' . $enhancedQuery . '%';
-$stmt = mysqli_prepare($conn, 'SELECT id, queries, replies FROM chatbot WHERE queries LIKE ? OR queries LIKE ? LIMIT 30');
-mysqli_stmt_bind_param($stmt, 'ss', $like1, $like2);
-mysqli_stmt_execute($stmt);
-$result = mysqli_stmt_get_result($stmt);
-$candidates = [];
-while ($row = mysqli_fetch_assoc($result)) {
-    $candidates[] = $row;
+// Determine if we're using intent-based or legacy matching
+$useIntentMatching = hasIntentTables($conn);
+
+// Normalize the user query for matching
+$normalizedQuery = normalizeText($getMesgRaw);
+$normalizedEnhanced = normalizeText($enhancedQuery);
+
+// ========== INTENT-BASED MATCHING ==========
+if ($useIntentMatching) {
+    // Level 1: Exact match on normalized training phrases
+    $exactStmt = mysqli_prepare($conn, '
+        SELECT tp.id, tp.intent_id, tp.phrase, tp.phrase_normalized, i.name as intent_name
+        FROM training_phrases tp
+        JOIN intents i ON tp.intent_id = i.id
+        WHERE i.is_active = 1 AND tp.phrase_normalized = ?
+        LIMIT 1
+    ');
+    mysqli_stmt_bind_param($exactStmt, 's', $normalizedQuery);
+    mysqli_stmt_execute($exactStmt);
+    $exactResult = mysqli_stmt_get_result($exactStmt);
+    $exactMatch = mysqli_fetch_assoc($exactResult);
+    mysqli_stmt_close($exactStmt);
+    
+    if ($exactMatch) {
+        // Get a response for this intent
+        $respStmt = mysqli_prepare($conn, '
+            SELECT id, response, confidence
+            FROM intent_responses
+            WHERE intent_id = ? AND is_active = 1
+            ORDER BY confidence DESC
+        ');
+        mysqli_stmt_bind_param($respStmt, 'i', $exactMatch['intent_id']);
+        mysqli_stmt_execute($respStmt);
+        $respResult = mysqli_stmt_get_result($respStmt);
+        $responses = [];
+        while ($r = mysqli_fetch_assoc($respResult)) {
+            $responses[] = $r;
+        }
+        mysqli_stmt_close($respStmt);
+        
+        if (!empty($responses)) {
+            // Weighted random selection based on confidence
+            $totalWeight = array_sum(array_column($responses, 'confidence'));
+            $rand = mt_rand() / mt_getrandmax() * $totalWeight;
+            $cumulative = 0;
+            $selectedResponse = $responses[0];
+            foreach ($responses as $resp) {
+                $cumulative += $resp['confidence'];
+                if ($rand <= $cumulative) {
+                    $selectedResponse = $resp;
+                    break;
+                }
+            }
+            
+            // Log history as matched
+            $stmt = mysqli_prepare($conn, 'INSERT INTO history_chat (text, replay) VALUES (?, ?)');
+            $matched = '1';
+            mysqli_stmt_bind_param($stmt, 'ss', $getMesgRaw, $matched);
+            mysqli_stmt_execute($stmt);
+            mysqli_stmt_close($stmt);
+            
+            // Update conversation history
+            if (!$isCommand && !empty($_SESSION['conversation_history'])) {
+                $lastIndex = count($_SESSION['conversation_history']) - 1;
+                if (isset($_SESSION['conversation_history'][$lastIndex])) {
+                    $_SESSION['conversation_history'][$lastIndex]['bot'] = $selectedResponse['response'];
+                }
+            }
+            
+            echo json_encode([
+                'ok' => true,
+                'found' => true,
+                'reply' => $selectedResponse['response'],
+                'confidence' => 100,
+                'intent' => $exactMatch['intent_name'],
+                'match_type' => 'exact'
+            ]);
+            exit;
+        }
+    }
+    
+    // Level 2: Fuzzy match on training phrases
+    $like1 = '%' . $getMesgRaw . '%';
+    $like2 = '%' . $normalizedQuery . '%';
+    $fuzzyStmt = mysqli_prepare($conn, '
+        SELECT tp.id, tp.intent_id, tp.phrase, tp.phrase_normalized, i.name as intent_name
+        FROM training_phrases tp
+        JOIN intents i ON tp.intent_id = i.id
+        WHERE i.is_active = 1 AND (tp.phrase LIKE ? OR tp.phrase_normalized LIKE ?)
+        LIMIT 50
+    ');
+    mysqli_stmt_bind_param($fuzzyStmt, 'ss', $like1, $like2);
+    mysqli_stmt_execute($fuzzyStmt);
+    $fuzzyResult = mysqli_stmt_get_result($fuzzyStmt);
+    $candidates = [];
+    while ($row = mysqli_fetch_assoc($fuzzyResult)) {
+        $candidates[] = $row;
+    }
+    mysqli_stmt_close($fuzzyStmt);
+} else {
+    // ========== LEGACY MATCHING (chatbot table) ==========
+    $like1 = '%' . $getMesgRaw . '%';
+    $like2 = '%' . $enhancedQuery . '%';
+    $stmt = mysqli_prepare($conn, 'SELECT id, queries, replies FROM chatbot WHERE queries LIKE ? OR queries LIKE ? LIMIT 30');
+    mysqli_stmt_bind_param($stmt, 'ss', $like1, $like2);
+    mysqli_stmt_execute($stmt);
+    $result = mysqli_stmt_get_result($stmt);
+    $candidates = [];
+    while ($row = mysqli_fetch_assoc($result)) {
+        $candidates[] = $row;
+    }
+    mysqli_stmt_close($stmt);
 }
-mysqli_stmt_close($stmt);
 
 // Jaro-Winkler similarity function (0-1 scale, where 1 = identical)
 function jaroWinkler($s1, $s2) {
@@ -594,14 +884,19 @@ $q1Lower = function_exists('mb_strtolower') ? mb_strtolower($getMesgRaw) : strto
 $q1Len = mb_strlen($getMesgRaw);
 
 // Try matching with both original query and enhanced query (with context)
-$queriesToTry = [$getMesgRaw];
+$queriesToTry = [$getMesgRaw, $normalizedQuery];
 if ($enhancedQuery !== $getMesgRaw && strlen($enhancedQuery) > strlen($getMesgRaw)) {
     $queriesToTry[] = $enhancedQuery;
+    $queriesToTry[] = $normalizedEnhanced;
 }
 
 foreach ($candidates as $row) {
-    $q2Lower = function_exists('mb_strtolower') ? mb_strtolower($row['queries']) : strtolower($row['queries']);
-    $q2Len = mb_strlen($row['queries']);
+    // Handle both intent-based (phrase/phrase_normalized) and legacy (queries) structures
+    $candidatePhrase = isset($row['phrase']) ? $row['phrase'] : (isset($row['queries']) ? $row['queries'] : '');
+    $candidateNormalized = isset($row['phrase_normalized']) ? $row['phrase_normalized'] : normalizeText($candidatePhrase);
+    
+    $q2Lower = function_exists('mb_strtolower') ? mb_strtolower($candidatePhrase) : strtolower($candidatePhrase);
+    $q2Len = mb_strlen($candidatePhrase);
     
     $bestMatchForThis = null;
     $bestConfidenceForThis = 0;
@@ -612,9 +907,12 @@ foreach ($candidates as $row) {
         $tryLower = function_exists('mb_strtolower') ? mb_strtolower($tryQuery) : strtolower($tryQuery);
         $tryLen = mb_strlen($tryQuery);
         
+        // Also try matching against the normalized version
+        $targetToMatch = $candidateNormalized !== '' ? $candidateNormalized : $q2Lower;
+        
         // Calculate Levenshtein distance
-        $levDistance = levenshtein($tryLower, $q2Lower);
-        $maxLen = max($tryLen, $q2Len);
+        $levDistance = levenshtein($tryLower, $targetToMatch);
+        $maxLen = max($tryLen, mb_strlen($targetToMatch));
         
         // Levenshtein-based confidence (0-100)
         $levConfidence = 0;
@@ -625,7 +923,7 @@ foreach ($candidates as $row) {
         }
         
         // Calculate Jaro-Winkler similarity (0-1 scale)
-        $jwSimilarity = jaroWinkler($tryLower, $q2Lower);
+        $jwSimilarity = jaroWinkler($tryLower, $targetToMatch);
         $jwConfidence = $jwSimilarity * 100; // Convert to 0-100 scale
         
         // Combined confidence: weighted average (60% Jaro-Winkler, 40% Levenshtein)
@@ -656,12 +954,55 @@ if ($best) {
     mysqli_stmt_execute($stmt);
     mysqli_stmt_close($stmt);
 
-    // Handle multiple replies - support JSON array or single string
-    $reply = $best['replies'];
-    $replies = json_decode($reply, true);
-    if (is_array($replies) && count($replies) > 0) {
-        // Multiple replies: pick one randomly
-        $reply = $replies[array_rand($replies)];
+    $reply = '';
+    $intentName = null;
+    $matchType = 'fuzzy';
+
+    if ($useIntentMatching && isset($best['intent_id'])) {
+        // Intent-based: fetch response from responses table
+        $intentName = isset($best['intent_name']) ? $best['intent_name'] : null;
+        
+        $respStmt = mysqli_prepare($conn, '
+            SELECT id, response, confidence
+            FROM intent_responses
+            WHERE intent_id = ? AND is_active = 1
+            ORDER BY confidence DESC
+        ');
+        mysqli_stmt_bind_param($respStmt, 'i', $best['intent_id']);
+        mysqli_stmt_execute($respStmt);
+        $respResult = mysqli_stmt_get_result($respStmt);
+        $responses = [];
+        while ($r = mysqli_fetch_assoc($respResult)) {
+            $responses[] = $r;
+        }
+        mysqli_stmt_close($respStmt);
+        
+        if (!empty($responses)) {
+            // Weighted random selection based on confidence
+            $totalWeight = array_sum(array_column($responses, 'confidence'));
+            if ($totalWeight > 0) {
+                $rand = mt_rand() / mt_getrandmax() * $totalWeight;
+                $cumulative = 0;
+                foreach ($responses as $resp) {
+                    $cumulative += $resp['confidence'];
+                    if ($rand <= $cumulative) {
+                        $reply = $resp['response'];
+                        break;
+                    }
+                }
+            }
+            if ($reply === '') {
+                $reply = $responses[0]['response'];
+            }
+        }
+    } else {
+        // Legacy: Handle multiple replies - support JSON array or single string
+        $reply = isset($best['replies']) ? $best['replies'] : '';
+        $replies = json_decode($reply, true);
+        if (is_array($replies) && count($replies) > 0) {
+            // Multiple replies: pick one randomly
+            $reply = $replies[array_rand($replies)];
+        }
     }
 
     // Update conversation history with bot's reply (only for non-commands)
@@ -672,12 +1013,18 @@ if ($best) {
         }
     }
 
-    echo json_encode([ 
+    $response = [ 
         'ok' => true, 
         'found' => true, 
         'reply' => $reply,
-        'confidence' => round($bestConfidence, 1)
-    ]);
+        'confidence' => round($bestConfidence, 1),
+        'match_type' => $matchType
+    ];
+    if ($intentName) {
+        $response['intent'] = $intentName;
+    }
+    
+    echo json_encode($response);
     exit;
 }
 
@@ -700,7 +1047,7 @@ mysqli_stmt_close($stmt);
 if (!$isCommand && !empty($_SESSION['conversation_history'])) {
     $lastIndex = count($_SESSION['conversation_history']) - 1;
     if (isset($_SESSION['conversation_history'][$lastIndex])) {
-        $_SESSION['conversation_history'][$lastIndex]['bot'] = "I don't know that yet. Teach me a reply?";
+        $_SESSION['conversation_history'][$lastIndex]['bot'] = "I don't have an answer for that yet. Your question has been saved for review.";
     }
 }
 
@@ -708,7 +1055,7 @@ echo json_encode([
     'ok' => true,
     'found' => false,
     'learn_id' => $learnId,
-    'message' => "I don't know that yet. Teach me a reply?"
+    'message' => "I don't have an answer for that yet. Your question has been saved for review."
 ]);
 exit;
 ?>
