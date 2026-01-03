@@ -83,6 +83,103 @@ function hasIntentTables($conn) {
     return $result && mysqli_num_rows($result) > 0;
 }
 
+/**
+ * Check if conversation tables exist
+ * @return bool
+ */
+function hasConversationTables($conn) {
+    $result = mysqli_query($conn, "SHOW TABLES LIKE 'conversations'");
+    return $result && mysqli_num_rows($result) > 0;
+}
+
+/**
+ * Get or create a conversation record for the current session
+ * @return int|null Conversation ID or null on error
+ */
+function getOrCreateConversation($conn) {
+    if (!hasConversationTables($conn)) {
+        return null;
+    }
+    
+    $sessionId = session_id();
+    if (empty($sessionId)) {
+        return null;
+    }
+    
+    // Check if conversation exists for this session
+    $stmt = mysqli_prepare($conn, "SELECT id FROM conversations WHERE session_id = ? AND is_active = 1 ORDER BY last_activity DESC LIMIT 1");
+    mysqli_stmt_bind_param($stmt, 's', $sessionId);
+    mysqli_stmt_execute($stmt);
+    $result = mysqli_stmt_get_result($stmt);
+    $conversation = mysqli_fetch_assoc($result);
+    mysqli_stmt_close($stmt);
+    
+    if ($conversation) {
+        return (int)$conversation['id'];
+    }
+    
+    // Create new conversation
+    $userIdentifier = isset($_SESSION['user_id']) ? $_SESSION['user_id'] : null;
+    $stmt = mysqli_prepare($conn, "INSERT INTO conversations (session_id, user_identifier) VALUES (?, ?)");
+    mysqli_stmt_bind_param($stmt, 'ss', $sessionId, $userIdentifier);
+    if (mysqli_stmt_execute($stmt)) {
+        $conversationId = mysqli_insert_id($conn);
+        mysqli_stmt_close($stmt);
+        return $conversationId;
+    }
+    mysqli_stmt_close($stmt);
+    return null;
+}
+
+/**
+ * Save a message to conversation_messages table
+ * @param int $conversationId Conversation ID
+ * @param string $sender 'user' or 'bot'
+ * @param string $message Message text
+ * @param int|null $intentId Intent ID if matched
+ * @param float|null $confidence Confidence score if matched
+ * @param string|null $matchType Match type (exact, fuzzy, etc.)
+ * @return bool Success
+ */
+function saveConversationMessage($conn, $conversationId, $sender, $message, $intentId = null, $confidence = null, $matchType = null) {
+    if (!hasConversationTables($conn) || !$conversationId) {
+        return false;
+    }
+    
+    // Build query with proper NULL handling
+    $stmt = mysqli_prepare($conn, "
+        INSERT INTO conversation_messages (conversation_id, sender, message, intent_id, confidence, match_type)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ");
+    
+    // For nullable values, we need to pass them as variables that can be NULL
+    $intentIdVar = $intentId;
+    $confidenceVar = $confidence;
+    $matchTypeVar = $matchType;
+    
+    // Use 'i' for INT (can be NULL), 'd' for DOUBLE (can be NULL), 's' for string (can be NULL)
+    mysqli_stmt_bind_param($stmt, 'issdss', 
+        $conversationId, 
+        $sender, 
+        $message, 
+        $intentIdVar, 
+        $confidenceVar, 
+        $matchTypeVar
+    );
+    $success = mysqli_stmt_execute($stmt);
+    mysqli_stmt_close($stmt);
+    
+    if ($success) {
+        // Update conversation message count and last activity
+        $updateStmt = mysqli_prepare($conn, "UPDATE conversations SET message_count = message_count + 1, last_activity = NOW() WHERE id = ?");
+        mysqli_stmt_bind_param($updateStmt, 'i', $conversationId);
+        mysqli_stmt_execute($updateStmt);
+        mysqli_stmt_close($updateStmt);
+    }
+    
+    return $success;
+}
+
 // Initialize conversation history in session if not exists
 if (!isset($_SESSION['conversation_history'])) {
     $_SESSION['conversation_history'] = [];
@@ -168,10 +265,10 @@ if ($getMesgRaw !== '' && preg_match('/^\s*replay_with\s*:(.*)$/i', $getMesgRaw,
         }
     } else {
         // Legacy: Insert into chatbot
-        $stmt = mysqli_prepare($conn, 'INSERT INTO chatbot (queries, replies) VALUES (?, ?)');
-        mysqli_stmt_bind_param($stmt, 'ss', $learning['queries'], $reply);
-        mysqli_stmt_execute($stmt);
-        mysqli_stmt_close($stmt);
+    $stmt = mysqli_prepare($conn, 'INSERT INTO chatbot (queries, replies) VALUES (?, ?)');
+    mysqli_stmt_bind_param($stmt, 'ss', $learning['queries'], $reply);
+    mysqli_stmt_execute($stmt);
+    mysqli_stmt_close($stmt);
     }
 
     // Cleanup learning sample
@@ -596,10 +693,10 @@ if (isset($_POST['teach_for']) && isset($_POST['reply'])) {
         }
     } else {
         // Legacy: Insert into chatbot
-        $stmt = mysqli_prepare($conn, 'INSERT INTO chatbot (queries, replies) VALUES (?, ?)');
-        mysqli_stmt_bind_param($stmt, 'ss', $learning['queries'], $reply);
-        mysqli_stmt_execute($stmt);
-        mysqli_stmt_close($stmt);
+    $stmt = mysqli_prepare($conn, 'INSERT INTO chatbot (queries, replies) VALUES (?, ?)');
+    mysqli_stmt_bind_param($stmt, 'ss', $learning['queries'], $reply);
+    mysqli_stmt_execute($stmt);
+    mysqli_stmt_close($stmt);
     }
 
     // Delete learning sample
@@ -652,6 +749,170 @@ if (isset($_POST['feedback']) && isset($_POST['message_id'])) {
     exit;
 }
 
+// API: List conversations for current session
+if (isset($_POST['action']) && $_POST['action'] === 'list_conversations') {
+    if (!hasConversationTables($conn)) {
+        echo json_encode([ 'ok' => false, 'error' => 'Conversation tables not available' ]);
+        exit;
+    }
+    
+    $sessionId = session_id();
+    $limit = isset($_POST['limit']) ? (int)$_POST['limit'] : 20;
+    $limit = min(max(1, $limit), 100); // Clamp between 1 and 100
+    
+    $stmt = mysqli_prepare($conn, "
+        SELECT id, started_at, last_activity, message_count
+        FROM conversations
+        WHERE session_id = ?
+        ORDER BY last_activity DESC
+        LIMIT ?
+    ");
+    mysqli_stmt_bind_param($stmt, 'si', $sessionId, $limit);
+    mysqli_stmt_execute($stmt);
+    $result = mysqli_stmt_get_result($stmt);
+    
+    $conversations = [];
+    while ($row = mysqli_fetch_assoc($result)) {
+        $conversations[] = [
+            'id' => (int)$row['id'],
+            'started_at' => $row['started_at'],
+            'last_activity' => $row['last_activity'],
+            'message_count' => (int)$row['message_count']
+        ];
+    }
+    mysqli_stmt_close($stmt);
+    
+    echo json_encode([ 'ok' => true, 'conversations' => $conversations ]);
+    exit;
+}
+
+// API: Load a specific conversation
+if (isset($_POST['action']) && $_POST['action'] === 'load_conversation') {
+    if (!hasConversationTables($conn)) {
+        echo json_encode([ 'ok' => false, 'error' => 'Conversation tables not available' ]);
+        exit;
+    }
+    
+    $conversationId = isset($_POST['conversation_id']) ? (int)$_POST['conversation_id'] : 0;
+    if ($conversationId <= 0) {
+        echo json_encode([ 'ok' => false, 'error' => 'Invalid conversation ID' ]);
+        exit;
+    }
+    
+    $sessionId = session_id();
+    
+    // Verify conversation belongs to this session
+    $checkStmt = mysqli_prepare($conn, "SELECT id FROM conversations WHERE id = ? AND session_id = ?");
+    mysqli_stmt_bind_param($checkStmt, 'is', $conversationId, $sessionId);
+    mysqli_stmt_execute($checkStmt);
+    $checkResult = mysqli_stmt_get_result($checkStmt);
+    if (mysqli_num_rows($checkResult) === 0) {
+        mysqli_stmt_close($checkStmt);
+        echo json_encode([ 'ok' => false, 'error' => 'Conversation not found' ]);
+        exit;
+    }
+    mysqli_stmt_close($checkStmt);
+    
+    // Load messages
+    $stmt = mysqli_prepare($conn, "
+        SELECT sender, message, intent_id, confidence, match_type, created_at
+        FROM conversation_messages
+        WHERE conversation_id = ?
+        ORDER BY created_at ASC
+    ");
+    mysqli_stmt_bind_param($stmt, 'i', $conversationId);
+    mysqli_stmt_execute($stmt);
+    $result = mysqli_stmt_get_result($stmt);
+    
+    $messages = [];
+    while ($row = mysqli_fetch_assoc($result)) {
+        $messages[] = [
+            'sender' => $row['sender'],
+            'message' => $row['message'],
+            'intent_id' => $row['intent_id'] ? (int)$row['intent_id'] : null,
+            'confidence' => $row['confidence'] ? (float)$row['confidence'] : null,
+            'match_type' => $row['match_type'],
+            'created_at' => $row['created_at']
+        ];
+    }
+    mysqli_stmt_close($stmt);
+    
+    echo json_encode([ 'ok' => true, 'messages' => $messages, 'conversation_id' => $conversationId ]);
+    exit;
+}
+
+// API: Search conversations
+if (isset($_POST['action']) && $_POST['action'] === 'search_conversations') {
+    if (!hasConversationTables($conn)) {
+        echo json_encode([ 'ok' => false, 'error' => 'Conversation tables not available' ]);
+        exit;
+    }
+    
+    $query = isset($_POST['query']) ? trim($_POST['query']) : '';
+    if (empty($query)) {
+        echo json_encode([ 'ok' => false, 'error' => 'Search query required' ]);
+        exit;
+    }
+    
+    $sessionId = session_id();
+    $limit = isset($_POST['limit']) ? (int)$_POST['limit'] : 50;
+    $limit = min(max(1, $limit), 200); // Clamp between 1 and 200
+    
+    // Search in messages using FULLTEXT or LIKE
+    $searchTerm = '%' . mysqli_real_escape_string($conn, $query) . '%';
+    $stmt = mysqli_prepare($conn, "
+        SELECT cm.id, cm.conversation_id, cm.sender, cm.message, cm.created_at,
+               c.started_at, c.message_count
+        FROM conversation_messages cm
+        JOIN conversations c ON cm.conversation_id = c.id
+        WHERE c.session_id = ? AND cm.message LIKE ?
+        ORDER BY cm.created_at DESC
+        LIMIT ?
+    ");
+    mysqli_stmt_bind_param($stmt, 'ssi', $sessionId, $searchTerm, $limit);
+    mysqli_stmt_execute($stmt);
+    $result = mysqli_stmt_get_result($stmt);
+    
+    $results = [];
+    while ($row = mysqli_fetch_assoc($result)) {
+        $results[] = [
+            'id' => (int)$row['id'],
+            'conversation_id' => (int)$row['conversation_id'],
+            'sender' => $row['sender'],
+            'message' => $row['message'],
+            'created_at' => $row['created_at'],
+            'conversation_started' => $row['started_at'],
+            'conversation_message_count' => (int)$row['message_count']
+        ];
+    }
+    mysqli_stmt_close($stmt);
+    
+    echo json_encode([ 'ok' => true, 'results' => $results, 'query' => $query ]);
+    exit;
+}
+
+// API: Start new conversation
+if (isset($_POST['action']) && $_POST['action'] === 'new_conversation') {
+    if (!hasConversationTables($conn)) {
+        echo json_encode([ 'ok' => false, 'error' => 'Conversation tables not available' ]);
+        exit;
+    }
+    
+    $sessionId = session_id();
+    
+    // Mark all existing conversations as inactive
+    $stmt = mysqli_prepare($conn, "UPDATE conversations SET is_active = 0 WHERE session_id = ?");
+    mysqli_stmt_bind_param($stmt, 's', $sessionId);
+    mysqli_stmt_execute($stmt);
+    mysqli_stmt_close($stmt);
+    
+    // Clear session conversation history
+    $_SESSION['conversation_history'] = [];
+    
+    echo json_encode([ 'ok' => true, 'message' => 'New conversation started' ]);
+    exit;
+}
+
 // Handle message query
 if (!isset($_POST['text'])) {
     echo json_encode([ 'ok' => false, 'error' => 'No text provided' ]);
@@ -696,6 +957,12 @@ if (!$isCommand) {
         'bot' => null,
         'timestamp' => time()
     ];
+    
+    // Save user message to database
+    $conversationId = getOrCreateConversation($conn);
+    if ($conversationId) {
+        saveConversationMessage($conn, $conversationId, 'user', $getMesgRaw);
+    }
 }
 
 // Determine if we're using intent-based or legacy matching
@@ -767,6 +1034,13 @@ if ($useIntentMatching) {
                 }
             }
             
+            // Save bot response to database
+            $conversationId = getOrCreateConversation($conn);
+            if ($conversationId) {
+                saveConversationMessage($conn, $conversationId, 'bot', $selectedResponse['response'], 
+                    (int)$exactMatch['intent_id'], 100.0, 'exact');
+            }
+            
             echo json_encode([
                 'ok' => true,
                 'found' => true,
@@ -799,17 +1073,17 @@ if ($useIntentMatching) {
     mysqli_stmt_close($fuzzyStmt);
 } else {
     // ========== LEGACY MATCHING (chatbot table) ==========
-    $like1 = '%' . $getMesgRaw . '%';
-    $like2 = '%' . $enhancedQuery . '%';
-    $stmt = mysqli_prepare($conn, 'SELECT id, queries, replies FROM chatbot WHERE queries LIKE ? OR queries LIKE ? LIMIT 30');
-    mysqli_stmt_bind_param($stmt, 'ss', $like1, $like2);
-    mysqli_stmt_execute($stmt);
-    $result = mysqli_stmt_get_result($stmt);
-    $candidates = [];
-    while ($row = mysqli_fetch_assoc($result)) {
-        $candidates[] = $row;
-    }
-    mysqli_stmt_close($stmt);
+$like1 = '%' . $getMesgRaw . '%';
+$like2 = '%' . $enhancedQuery . '%';
+$stmt = mysqli_prepare($conn, 'SELECT id, queries, replies FROM chatbot WHERE queries LIKE ? OR queries LIKE ? LIMIT 30');
+mysqli_stmt_bind_param($stmt, 'ss', $like1, $like2);
+mysqli_stmt_execute($stmt);
+$result = mysqli_stmt_get_result($stmt);
+$candidates = [];
+while ($row = mysqli_fetch_assoc($result)) {
+    $candidates[] = $row;
+}
+mysqli_stmt_close($stmt);
 }
 
 // Jaro-Winkler similarity function (0-1 scale, where 1 = identical)
@@ -998,10 +1272,10 @@ if ($best) {
     } else {
         // Legacy: Handle multiple replies - support JSON array or single string
         $reply = isset($best['replies']) ? $best['replies'] : '';
-        $replies = json_decode($reply, true);
-        if (is_array($replies) && count($replies) > 0) {
-            // Multiple replies: pick one randomly
-            $reply = $replies[array_rand($replies)];
+    $replies = json_decode($reply, true);
+    if (is_array($replies) && count($replies) > 0) {
+        // Multiple replies: pick one randomly
+        $reply = $replies[array_rand($replies)];
         }
     }
 
@@ -1011,6 +1285,17 @@ if ($best) {
         if (isset($_SESSION['conversation_history'][$lastIndex])) {
             $_SESSION['conversation_history'][$lastIndex]['bot'] = $reply;
         }
+    }
+
+    // Save bot response to database
+    $conversationId = getOrCreateConversation($conn);
+    if ($conversationId) {
+        $intentIdForSave = null;
+        if ($useIntentMatching && isset($best['intent_id'])) {
+            $intentIdForSave = (int)$best['intent_id'];
+        }
+        saveConversationMessage($conn, $conversationId, 'bot', $reply, 
+            $intentIdForSave, round($bestConfidence, 1), $matchType);
     }
 
     $response = [ 
@@ -1044,18 +1329,25 @@ mysqli_stmt_execute($stmt);
 mysqli_stmt_close($stmt);
 
 // Update conversation history with "unknown" response (only for non-commands)
+$unknownMessage = "I don't have an answer for that yet. Your question has been saved for review.";
 if (!$isCommand && !empty($_SESSION['conversation_history'])) {
     $lastIndex = count($_SESSION['conversation_history']) - 1;
     if (isset($_SESSION['conversation_history'][$lastIndex])) {
-        $_SESSION['conversation_history'][$lastIndex]['bot'] = "I don't have an answer for that yet. Your question has been saved for review.";
+        $_SESSION['conversation_history'][$lastIndex]['bot'] = $unknownMessage;
     }
+}
+
+// Save bot "unknown" response to database
+$conversationId = getOrCreateConversation($conn);
+if ($conversationId) {
+    saveConversationMessage($conn, $conversationId, 'bot', $unknownMessage, null, null, 'unknown');
 }
 
 echo json_encode([
     'ok' => true,
     'found' => false,
     'learn_id' => $learnId,
-    'message' => "I don't have an answer for that yet. Your question has been saved for review."
+    'message' => $unknownMessage
 ]);
 exit;
 ?>

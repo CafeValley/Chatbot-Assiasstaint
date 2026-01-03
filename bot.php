@@ -6,7 +6,7 @@
     <title>AI Chatbot Assistant</title>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="jquery-3.5.1.min.js"></script>
-    <style>
+<style>
         :root {
             --ocean-deep: #0c1929;
             --ocean-dark: #0f2744;
@@ -168,14 +168,14 @@
         }
 
         /* Help Panel */
-        .help-toggle {
+.help-toggle {
             background: rgba(20, 184, 166, 0.15);
             color: var(--teal-light);
             padding: 10px 16px;
-            cursor: pointer;
+    cursor: pointer;
             font-size: 0.85rem;
             font-weight: 500;
-            text-align: center;
+    text-align: center;
             border-bottom: 1px solid rgba(94, 234, 212, 0.1);
             transition: all 0.3s;
             display: flex;
@@ -188,8 +188,8 @@
             background: rgba(20, 184, 166, 0.25);
         }
 
-        .help-panel {
-            display: none;
+.help-panel {
+    display: none;
             background: rgba(12, 25, 41, 0.9);
             padding: 20px;
             font-size: 0.85rem;
@@ -228,7 +228,7 @@
         /* Messages Area */
         .messages {
             flex: 1;
-            overflow-y: auto;
+    overflow-y: auto;
             padding: 24px;
             display: flex;
             flex-direction: column;
@@ -328,8 +328,8 @@
         }
 
         .user .message-time {
-            text-align: right;
-        }
+    text-align: right;
+}
 
         /* Confidence badge */
         .confidence {
@@ -374,15 +374,15 @@
         }
 
         /* Typing indicator */
-        .typing-indicator {
-            display: none;
+.typing-indicator {
+    display: none;
             padding: 8px 16px;
             color: var(--text-secondary);
             font-size: 0.85rem;
-            font-style: italic;
-        }
+    font-style: italic;
+}
 
-        .typing-indicator.active {
+.typing-indicator.active {
             display: flex;
             align-items: center;
             gap: 8px;
@@ -417,10 +417,10 @@
         }
 
         .input-container {
-            display: flex;
+    display: flex;
             gap: 12px;
-            align-items: center;
-        }
+    align-items: center;
+}
 
         .input-container input {
             flex: 1;
@@ -453,7 +453,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            cursor: pointer;
+    cursor: pointer;
             transition: all 0.3s;
             box-shadow: 0 4px 16px var(--shadow-color);
         }
@@ -472,7 +472,338 @@
         .send-btn:active {
             transform: translateY(0);
         }
-    </style>
+
+        /* History Sidebar */
+        .history-sidebar {
+            position: fixed;
+            top: 0;
+            right: -400px;
+            width: 400px;
+            height: 100vh;
+            background: rgba(15, 39, 68, 0.98);
+            backdrop-filter: blur(20px);
+            border-left: 1px solid rgba(94, 234, 212, 0.15);
+            z-index: 1000;
+            transition: right 0.3s ease;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .history-sidebar.open {
+            right: 0;
+        }
+
+        .sidebar-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid rgba(94, 234, 212, 0.15);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .sidebar-header h2 {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin: 0;
+        }
+
+        .sidebar-close, .search-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 2rem;
+            cursor: pointer;
+            padding: 0;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: color 0.3s;
+        }
+
+        .sidebar-close:hover, .search-close:hover {
+            color: var(--teal-light);
+        }
+
+        .sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+        }
+
+        .new-chat-btn {
+            width: 100%;
+            padding: 12px 16px;
+            background: linear-gradient(135deg, var(--teal-primary), var(--ocean-light));
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            margin-bottom: 16px;
+            transition: transform 0.2s;
+        }
+
+        .new-chat-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .conversations-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .conversation-item {
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(94, 234, 212, 0.1);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .conversation-item:hover {
+            background: rgba(20, 184, 166, 0.15);
+            border-color: var(--teal-primary);
+        }
+
+        .conversation-date {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+
+        .conversation-meta {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .loading {
+            text-align: center;
+            color: var(--text-secondary);
+            padding: 20px;
+        }
+
+        /* Search Modal */
+        .search-modal {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0.9);
+            width: 90%;
+            max-width: 600px;
+            max-height: 80vh;
+            background: rgba(15, 39, 68, 0.98);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(94, 234, 212, 0.15);
+            border-radius: 20px;
+            z-index: 1001;
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.3s ease;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .search-modal.open {
+            opacity: 1;
+            pointer-events: all;
+            transform: translate(-50%, -50%) scale(1);
+        }
+
+        .search-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid rgba(94, 234, 212, 0.15);
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        #search-input {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(94, 234, 212, 0.2);
+            border-radius: 12px;
+            padding: 12px 16px;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 1rem;
+        }
+
+        #search-input:focus {
+            outline: none;
+            border-color: var(--teal-primary);
+            background: rgba(20, 184, 166, 0.05);
+        }
+
+        .search-results {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+        }
+
+        .search-placeholder {
+            text-align: center;
+            color: var(--text-secondary);
+            padding: 40px 20px;
+        }
+
+        .search-result-item {
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(94, 234, 212, 0.1);
+            border-radius: 12px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .search-result-item:hover {
+            background: rgba(20, 184, 166, 0.15);
+            border-color: var(--teal-primary);
+        }
+
+        .search-result-sender {
+            font-size: 0.75rem;
+            color: var(--teal-light);
+            margin-bottom: 4px;
+            text-transform: uppercase;
+        }
+
+        .search-result-message {
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+
+        .search-result-date {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+        }
+
+        .highlight {
+            background: rgba(20, 184, 166, 0.3);
+            padding: 2px 4px;
+            border-radius: 4px;
+        }
+
+        /* Sidebar Overlay */
+        .sidebar-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 999;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+
+        .sidebar-overlay.active {
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        /* Mobile Responsive */
+        @media (max-width: 768px) {
+            .chat-container {
+                max-width: 100%;
+                height: 100vh;
+                max-height: 100vh;
+                border-radius: 0;
+            }
+
+            body {
+                padding: 0;
+            }
+
+            .history-sidebar {
+                width: 100%;
+                right: -100%;
+            }
+
+            .search-modal {
+                width: 95%;
+                max-height: 90vh;
+            }
+
+            .header-actions {
+                gap: 4px;
+            }
+
+            .header-btn {
+                width: 36px;
+                height: 36px;
+            }
+
+            .header-btn svg {
+                width: 18px;
+                height: 18px;
+            }
+
+            .message {
+                max-width: 90%;
+            }
+
+            .message-bubble {
+                padding: 12px 16px;
+                font-size: 0.9rem;
+            }
+
+            .input-container input {
+                padding: 12px 16px;
+                font-size: 0.9rem;
+            }
+
+            .send-btn {
+                width: 48px;
+                height: 48px;
+            }
+
+            .reaction-btn {
+                padding: 8px 12px;
+                font-size: 0.9rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .header-info h1 {
+                font-size: 1rem;
+            }
+
+            .header-info .status {
+                font-size: 0.75rem;
+            }
+
+            .message-bubble {
+                padding: 10px 14px;
+                font-size: 0.85rem;
+            }
+
+            .input-area {
+                padding: 16px;
+            }
+        }
+
+        /* Prevent zoom on input focus (iOS) */
+        @media screen and (max-width: 768px) {
+            input, textarea, select {
+                font-size: 16px !important;
+            }
+        }
+
+        /* Better touch targets */
+        @media (max-width: 768px) {
+            .header-btn, .send-btn, .reaction-btn {
+                min-width: 44px;
+                min-height: 44px;
+            }
+        }
+</style>
 </head>
 <body>
     <div class="chat-container">
@@ -490,6 +821,12 @@
                     </div>
                 </div>
                 <div class="header-actions">
+                    <button class="header-btn" id="search-btn" title="Search (Ctrl+K)">
+                        <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                    </button>
+                    <button class="header-btn" id="history-btn" title="Chat History">
+                        <svg viewBox="0 0 24 24"><path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+                    </button>
                     <a href="index.php" class="header-btn" title="Home">
                         <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
                     </a>
@@ -530,7 +867,7 @@
         </div>
 
         <!-- Typing Indicator -->
-        <div class="typing-indicator" id="typing-indicator">
+            <div class="typing-indicator" id="typing-indicator">
             <div class="typing-dots">
                 <span></span><span></span><span></span>
             </div>
@@ -548,6 +885,33 @@
         </div>
     </div>
 
+    <!-- History Sidebar -->
+    <div class="history-sidebar" id="history-sidebar">
+        <div class="sidebar-header">
+            <h2>Chat History</h2>
+            <button class="sidebar-close" id="history-close">&times;</button>
+        </div>
+        <div class="sidebar-content">
+            <button class="new-chat-btn" id="new-chat-btn">+ New Chat</button>
+            <div class="conversations-list" id="conversations-list">
+                <div class="loading">Loading conversations...</div>
+            </div>
+        </div>
+    </div>
+    <div class="sidebar-overlay" id="history-overlay"></div>
+
+    <!-- Search Modal -->
+    <div class="search-modal" id="search-modal">
+        <div class="search-header">
+            <input type="text" id="search-input" placeholder="Search conversations..." autocomplete="off">
+            <button class="search-close" id="search-close">&times;</button>
+        </div>
+        <div class="search-results" id="search-results">
+            <div class="search-placeholder">Type to search your conversation history...</div>
+        </div>
+    </div>
+    <div class="sidebar-overlay" id="search-overlay"></div>
+
     <script>
     $(function(){
         function getTimestamp(){
@@ -562,43 +926,43 @@
 
         $('#initial-time').text(getTimestamp());
 
-        $('#help-toggle').on('click', function(){
-            var panel = $('#help-panel');
-            panel.slideToggle(200);
+            $('#help-toggle').on('click', function(){
+                var panel = $('#help-panel');
+                panel.slideToggle(200);
             $(this).find('svg').css('transform', panel.is(':visible') ? 'rotate(180deg)' : 'rotate(0)');
-        });
+            });
 
-        function sanitize(text){
-            return $('<div/>').text(text).html();
-        }
+            function sanitize(text){
+                return $('<div/>').text(text).html();
+            }
 
-        function showTyping(){
-            $('#typing-indicator').addClass('active');
+            function showTyping(){
+                $('#typing-indicator').addClass('active');
             scrollToBottom();
-        }
+            }
 
-        function hideTyping(){
-            $('#typing-indicator').removeClass('active');
-        }
+            function hideTyping(){
+                $('#typing-indicator').removeClass('active');
+            }
 
         function scrollToBottom(){
             var messages = $('#messages');
             messages.scrollTop(messages[0].scrollHeight);
-        }
+            }
 
-        var lastUserQuery = '';
-
-        function appendBotMessage(text, extraHtml, query, reply){
-            hideTyping();
-            var messageId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-            var queryVal = query || lastUserQuery || '';
-            var replyVal = reply || text || '';
-
+            var lastUserQuery = '';
+            
+            function appendBotMessage(text, extraHtml, query, reply){
+                hideTyping();
+                var messageId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                var queryVal = query || lastUserQuery || '';
+                var replyVal = reply || text || '';
+                
             var reactions = '<div class="reactions">' +
                 '<button class="reaction-btn thumbs-up" data-message-id="' + messageId + '" data-query="' + sanitize(queryVal) + '" data-reply="' + sanitize(replyVal) + '">👍</button>' +
                 '<button class="reaction-btn thumbs-down" data-message-id="' + messageId + '" data-query="' + sanitize(queryVal) + '" data-reply="' + sanitize(replyVal) + '">👎</button>' +
-            '</div>';
-
+                    '</div>';
+                
             var html = '<div class="message bot">' +
                 '<div class="message-avatar"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/></svg></div>' +
                 '<div class="message-content">' +
@@ -609,9 +973,9 @@
             '</div>';
             $('#messages').append(html);
             scrollToBottom();
-        }
+            }
 
-        function appendUserMessage(text){
+            function appendUserMessage(text){
             var html = '<div class="message user">' +
                 '<div class="message-avatar"><svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg></div>' +
                 '<div class="message-content">' +
@@ -621,47 +985,47 @@
             '</div>';
             $('#messages').append(html);
             scrollToBottom();
-        }
+            }
 
-        function sendMessage(){
+            function sendMessage(){
             var value = $('#message-input').val().trim();
-            if(!value) return;
+                if(!value) return;
             lastUserQuery = value;
-            appendUserMessage(value);
+                appendUserMessage(value);
             $('#message-input').val('');
-            showTyping();
+                showTyping();
 
-            $.ajax({
-                url: 'message.php',
-                type: 'POST',
-                dataType: 'json',
-                data: { text: value },
-                success: function(res){
-                    if(!res || res.ok === false){
+                $.ajax({
+                    url: 'message.php',
+                    type: 'POST',
+                    dataType: 'json',
+                    data: { text: value },
+                    success: function(res){
+                        if(!res || res.ok === false){
                         if(res && res.admin_required){
                             appendBotMessage('This command requires admin access. Please use the admin panel.', '', '', '');
                         } else {
                             appendBotMessage(res && res.error ? res.error : 'Sorry, something went wrong.', '', '', '');
                         }
-                        return;
-                    }
+                                return;
+                            }
                     if (res.command) {
                         handleCommandResponse(res);
-                        return;
-                    }
-                    if(res.found){
+                            return;
+                        }
+                        if(res.found){
                         var conf = res.confidence !== undefined ? '<span class="confidence">Confidence: ' + res.confidence + '%</span>' : '';
                         appendBotMessage(res.reply || '', conf, lastUserQuery, res.reply);
-                    } else {
+                        } else {
                         appendBotMessage(res.message || "I don't have an answer for that yet. Your question has been saved and will be reviewed by our team.", '', lastUserQuery, res.message);
-                    }
-                },
-                error: function(xhr){
-                    hideTyping();
+                        }
+                    },
+                    error: function(xhr){
+                        hideTyping();
                     appendBotMessage('Network error. Please try again.', '', '', '');
-                }
-            });
-        }
+                    }
+                });
+            }
 
         function handleCommandResponse(res){
             hideTyping();
@@ -681,7 +1045,7 @@
             } else if (res.type === 'show_context') {
                 var history = res.history || [];
                 msg = history.length === 0 ? 'No history.' : history.map(function(h){ return 'You: ' + h.user + (h.bot ? ' | Bot: ' + h.bot : ''); }).join('\n');
-            } else {
+                        } else {
                 msg = res.message || 'Command executed.';
             }
             appendBotMessage(msg, '', '', '');
@@ -704,7 +1068,192 @@
 
             $.post('message.php', { feedback: type, message_id: messageId, query: query, reply: reply }, null, 'json');
         });
-    });
+
+        // History Sidebar
+        function openHistory() {
+            $('#history-sidebar').addClass('open');
+            $('#history-overlay').addClass('active');
+            loadConversations();
+        }
+
+        function closeHistory() {
+            $('#history-sidebar').removeClass('open');
+            $('#history-overlay').removeClass('active');
+        }
+
+        function loadConversations() {
+            $('#conversations-list').html('<div class="loading">Loading conversations...</div>');
+            $.post('message.php', { action: 'list_conversations', limit: 50 }, function(res) {
+                if (res && res.ok && res.conversations) {
+                    if (res.conversations.length === 0) {
+                        $('#conversations-list').html('<div class="loading">No conversations yet</div>');
+                        return;
+                    }
+                    var html = '';
+                    res.conversations.forEach(function(conv) {
+                        var date = new Date(conv.last_activity);
+                        var dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                        html += '<div class="conversation-item" data-id="' + conv.id + '">' +
+                            '<div class="conversation-date">' + dateStr + '</div>' +
+                            '<div class="conversation-meta">' + conv.message_count + ' messages</div>' +
+                            '</div>';
+                    });
+                    $('#conversations-list').html(html);
+                } else {
+                    $('#conversations-list').html('<div class="loading">Error loading conversations</div>');
+                }
+            }, 'json').fail(function() {
+                $('#conversations-list').html('<div class="loading">Error loading conversations</div>');
+            });
+        }
+
+        function loadConversation(conversationId) {
+            $.post('message.php', { action: 'load_conversation', conversation_id: conversationId }, function(res) {
+                if (res && res.ok && res.messages) {
+                    $('#messages').empty();
+                    res.messages.forEach(function(msg) {
+                        if (msg.sender === 'user') {
+                            appendUserMessage(msg.message);
+                        } else {
+                            appendBotMessage(msg.message, '', '', msg.message);
+                        }
+                    });
+                    closeHistory();
+                    scrollToBottom();
+                }
+            }, 'json');
+        }
+
+        function startNewConversation() {
+            $.post('message.php', { action: 'new_conversation' }, function(res) {
+                if (res && res.ok) {
+                    $('#messages').empty();
+                    appendBotMessage('Hello! How can I help you today?', '', '', '');
+                    closeHistory();
+                }
+            }, 'json');
+        }
+
+        $('#history-btn').on('click', openHistory);
+        $('#history-close').on('click', closeHistory);
+        $('#history-overlay').on('click', closeHistory);
+        $('#new-chat-btn').on('click', startNewConversation);
+        $(document).on('click', '.conversation-item', function() {
+            var id = $(this).data('id');
+            if (id) loadConversation(id);
+        });
+
+        // Search Modal
+        function openSearch() {
+            $('#search-modal').addClass('open');
+            $('#search-overlay').addClass('active');
+            setTimeout(function() {
+                $('#search-input').focus();
+            }, 100);
+        }
+
+        function closeSearch() {
+            $('#search-modal').removeClass('open');
+            $('#search-overlay').removeClass('active');
+            $('#search-input').val('');
+            $('#search-results').html('<div class="search-placeholder">Type to search your conversation history...</div>');
+        }
+
+        var searchTimeout;
+        $('#search-input').on('input', function() {
+            var query = $(this).val().trim();
+            clearTimeout(searchTimeout);
+            
+            if (query.length < 2) {
+                $('#search-results').html('<div class="search-placeholder">Type at least 2 characters to search...</div>');
+                return;
+            }
+
+            searchTimeout = setTimeout(function() {
+                $.post('message.php', { action: 'search_conversations', query: query, limit: 50 }, function(res) {
+                    if (res && res.ok && res.results) {
+                        if (res.results.length === 0) {
+                            $('#search-results').html('<div class="search-placeholder">No results found</div>');
+                            return;
+                        }
+                        var html = '';
+                        res.results.forEach(function(result) {
+                            var date = new Date(result.created_at);
+                            var dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                            var message = sanitize(result.message);
+                            // Simple highlight (case-insensitive)
+                            var regex = new RegExp('(' + query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+                            message = message.replace(regex, '<span class="highlight">$1</span>');
+                            html += '<div class="search-result-item" data-conversation-id="' + result.conversation_id + '">' +
+                                '<div class="search-result-sender">' + (result.sender === 'user' ? 'You' : 'Bot') + '</div>' +
+                                '<div class="search-result-message">' + message + '</div>' +
+                                '<div class="search-result-date">' + dateStr + '</div>' +
+                                '</div>';
+                        });
+                        $('#search-results').html(html);
+                    } else {
+                        $('#search-results').html('<div class="search-placeholder">Error searching</div>');
+                    }
+                }, 'json').fail(function() {
+                    $('#search-results').html('<div class="search-placeholder">Error searching</div>');
+                });
+            }, 300);
+        });
+
+        $('#search-btn').on('click', openSearch);
+        $('#search-close').on('click', closeSearch);
+        $('#search-overlay').on('click', closeSearch);
+        $(document).on('click', '.search-result-item', function() {
+            var convId = $(this).data('conversation-id');
+            if (convId) {
+                closeSearch();
+                loadConversation(convId);
+            }
+        });
+
+        // Keyboard shortcuts
+        $(document).on('keydown', function(e) {
+            // Ctrl+K or Cmd+K for search
+            if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+                e.preventDefault();
+                if ($('#search-modal').hasClass('open')) {
+                    closeSearch();
+                        } else {
+                    openSearch();
+                }
+            }
+            // Escape to close modals
+            if (e.key === 'Escape') {
+                closeHistory();
+                closeSearch();
+            }
+        });
+
+        // Mobile: Prevent body scroll when sidebar is open
+        function toggleBodyScroll(disable) {
+            if (disable) {
+                $('body').css('overflow', 'hidden');
+            } else {
+                $('body').css('overflow', '');
+            }
+        }
+
+        $('#history-btn, #search-btn').on('click', function() {
+            toggleBodyScroll(true);
+        });
+
+        $('#history-close, #search-close, #history-overlay, #search-overlay').on('click', function() {
+            toggleBodyScroll(false);
+        });
+
+        // Mobile: Fix viewport height on iOS
+        function setViewportHeight() {
+            var vh = window.innerHeight * 0.01;
+            document.documentElement.style.setProperty('--vh', vh + 'px');
+        }
+        setViewportHeight();
+        $(window).on('resize orientationchange', setViewportHeight);
+        });
     </script>
 </body>
 </html>

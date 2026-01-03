@@ -208,3 +208,4 @@ $faqData = [
 require_once __DIR__ . '/seed_helper.php';
 insertSeedData($conn, $faqData, 'Technical Support');
 
+

@@ -195,3 +195,4 @@ $faqData = [
 require_once __DIR__ . '/seed_helper.php';
 insertSeedData($conn, $faqData, 'Restaurant/Food Service');
 
+

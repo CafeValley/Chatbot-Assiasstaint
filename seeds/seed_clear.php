@@ -35,3 +35,4 @@ echo "Run individual seeds or 'php seeds/seed_all.php' to populate.\n\n";
 
 mysqli_close($conn);
 
+
